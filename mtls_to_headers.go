@@ -3,6 +3,7 @@ package traefik_mtlstoheaders_plugin
 import (
 	"context"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -27,10 +28,39 @@ type Config struct {
 }
 
 type tlsClientCertificateInfo struct {
-	notAfter     string
-	notBefore    string
-	serialNumber string
-	SANS         *tlsClientCertificateSans `json:"sans,omitempty"`
+	NotAfter     string                           `json:"notAfter,omitempty"`
+	NotBefore    string                           `json:"notBefore,omitempty"`
+	SerialNumber string                           `json:"serialNumber,omitempty"`
+	Subject      *SubjectDistinguishedNameOptions `json:"subject,omitempty"`
+	Issuer       *IssuerDistinguishedNameOptions  `json:"issuer,omitempty"`
+	SANS         *tlsClientCertificateSans        `json:"sans,omitempty"`
+}
+
+// IssuerDistinguishedNameOptions is a struct for specifying the configuration
+// for the distinguished name info of the issuer. This information is defined in
+// RFC3739, section 3.1.1.
+type IssuerDistinguishedNameOptions struct {
+	CommonName          string `json:"commonName,omitempty"`
+	CountryName         string `json:"country,omitempty"`
+	DomainComponent     string `json:"domainComponent,omitempty"`
+	LocalityName        string `json:"locality,omitempty"`
+	OrganizationName    string `json:"organization,omitempty"`
+	SerialNumber        string `json:"serialNumber,omitempty"`
+	StateOrProvinceName string `json:"province,omitempty"`
+}
+
+// SubjectDistinguishedNameOptions is a struct for specifying the configuration
+// for the distinguished name info of the subject. This information is defined
+// in RFC3739, section 3.1.2.
+type SubjectDistinguishedNameOptions struct {
+	CommonName             string `json:"commonName,omitempty"`
+	CountryName            string `json:"country,omitempty"`
+	DomainComponent        string `json:"domainComponent,omitempty"`
+	LocalityName           string `json:"locality,omitempty"`
+	OrganizationName       string `json:"organization,omitempty"`
+	OrganizationalUnitName string `json:"organizationalUnit,omitempty"`
+	SerialNumber           string `json:"serialNumber,omitempty"`
+	StateOrProvinceName    string `json:"province,omitempty"`
 }
 
 type tlsClientCertificateSans struct {
@@ -68,22 +98,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 }
 
 func (p *MTLSToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	// for key, value := range a.headers {
-	// 	tmpl, err := a.template.Parse(value)
-	// 	if err != nil {
-	// 		http.Error(rw, err.Error(), http.StatusInternalServerError)
-	// 		return
-	// 	}
 
-	// 	writer := &bytes.Buffer{}
-
-	// 	err = tmpl.Execute(writer, req)
-	// 	if err != nil {
-	// 		http.Error(rw, err.Error(), http.StatusInternalServerError)
-	// 		return
-	// 	}
-
-	// }
 	if p.pem != "" {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
 			req.Header.Set(xForwardedTLS+p.pem, strings.TrimSuffix(getCertificates(req.TLS.PeerCertificates), subFieldSeparator))
@@ -150,25 +165,97 @@ func sanitize(cert []byte) string {
 // - if a field is empty, the field is ignored.
 func (p *MTLSToHeaders) extractCertInfo(certs []*x509.Certificate, req *http.Request) {
 	for _, peerCert := range certs {
-		if p.info.serialNumber != "" && peerCert.SerialNumber != nil {
+		if p.info.SerialNumber != "" && peerCert.SerialNumber != nil {
 			sn := peerCert.SerialNumber.String()
 			if sn != "" {
-				writeHeaderValue(req, p.info.serialNumber, sn)
+				writeHeaderValue(req, p.info.SerialNumber, sn)
 			}
 		}
 
-		if p.info.notBefore != "" {
-			writeHeaderValue(req, p.info.notBefore, fmt.Sprintf("%d", uint64(peerCert.NotBefore.Unix())))
+		if p.info.NotBefore != "" {
+			writeHeaderValue(req, p.info.NotBefore, fmt.Sprintf("%d", uint64(peerCert.NotBefore.Unix())))
 		}
 
-		if p.info.notAfter != "" {
-			writeHeaderValue(req, p.info.notAfter, fmt.Sprintf("%d", uint64(peerCert.NotAfter.Unix())))
+		if p.info.NotAfter != "" {
+			writeHeaderValue(req, p.info.NotAfter, fmt.Sprintf("%d", uint64(peerCert.NotAfter.Unix())))
 		}
 
-		if p.info != nil {
+		if p.info != nil && p.info.Subject != nil {
+			extractSubjectDNInfo(p.info.Subject, &peerCert.Subject, req)
+		}
+
+		if p.info != nil && p.info.Issuer != nil {
+			extractIssuerDNInfo(p.info.Issuer, &peerCert.Issuer, req)
+		}
+
+		if p.info != nil && p.info.SANS != nil {
 			extractSANs(p.info.SANS, peerCert, req)
 		}
 
+	}
+}
+
+func extractSubjectDNInfo(options *SubjectDistinguishedNameOptions, cs *pkix.Name, req *http.Request) {
+	if options == nil {
+		return
+	}
+
+	if options.CountryName != "" {
+		writeHeaderValues(req, options.CountryName, cs.Country)
+	}
+
+	if options.StateOrProvinceName != "" {
+		writeHeaderValues(req, options.StateOrProvinceName, cs.Province)
+	}
+
+	if options.LocalityName != "" {
+		writeHeaderValues(req, options.LocalityName, cs.Locality)
+	}
+
+	if options.OrganizationName != "" {
+		writeHeaderValues(req, options.OrganizationName, cs.Organization)
+	}
+
+	if options.OrganizationalUnitName != "" {
+		writeHeaderValues(req, options.OrganizationalUnitName, cs.OrganizationalUnit)
+	}
+
+	if options.SerialNumber != "" {
+		writeHeaderValue(req, options.SerialNumber, cs.SerialNumber)
+	}
+
+	if options.CommonName != "" {
+		writeHeaderValue(req, options.CommonName, cs.CommonName)
+	}
+}
+
+func extractIssuerDNInfo(options *IssuerDistinguishedNameOptions, cs *pkix.Name, req *http.Request) {
+	if options == nil {
+		return
+	}
+
+	if options.CountryName != "" {
+		writeHeaderValues(req, options.CountryName, cs.Country)
+	}
+
+	if options.StateOrProvinceName != "" {
+		writeHeaderValues(req, options.StateOrProvinceName, cs.Province)
+	}
+
+	if options.LocalityName != "" {
+		writeHeaderValues(req, options.LocalityName, cs.Locality)
+	}
+
+	if options.OrganizationName != "" {
+		writeHeaderValues(req, options.OrganizationName, cs.Organization)
+	}
+
+	if options.SerialNumber != "" {
+		writeHeaderValue(req, options.SerialNumber, cs.SerialNumber)
+	}
+
+	if options.CommonName != "" {
+		writeHeaderValue(req, options.CommonName, cs.CommonName)
 	}
 }
 

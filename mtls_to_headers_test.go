@@ -282,24 +282,24 @@ func TestPassTLSClientCert_PEM(t *testing.T) {
 		},
 		{
 			desc:   "No TLS, with pem option true",
-			config: Config{pem: "Client-Cert"},
+			config: Config{PEM: "Client-Cert"},
 		},
 		{
 			desc:           "TLS with simple certificate, with pem option true",
 			certContents:   []string{minimalCheeseCrt},
-			config:         Config{pem: "Client-Cert"},
+			config:         Config{PEM: "Client-Cert"},
 			expectedHeader: getCleanCertContents([]string{minimalCert}),
 		},
 		{
 			desc:           "TLS with complete certificate, with pem option true",
 			certContents:   []string{minimalCheeseCrt},
-			config:         Config{pem: "Client-Cert"},
+			config:         Config{PEM: "Client-Cert"},
 			expectedHeader: getCleanCertContents([]string{minimalCheeseCrt}),
 		},
 		{
 			desc:           "TLS with two certificate, with pem option true",
 			certContents:   []string{minimalCert, minimalCheeseCrt},
-			config:         Config{pem: "Client-Cert"},
+			config:         Config{PEM: "Client-Cert"},
 			expectedHeader: getCleanCertContents([]string{minimalCert, minimalCheeseCrt}),
 		},
 	}
