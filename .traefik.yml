@@ -1,10 +1,10 @@
-displayName: Demo Plugin
+displayName: mTLS To Headers
 type: middleware
 iconPath: .assets/icon.png
 
-import: github.com/traefik/plugindemo
+import: github.com/Sammy1Am/traefik-mtlstoheaders-plugin
 
-summary: '[Demo] Add Request Header'
+summary: 'mTLS To Headers'
 
 testData:
   Headers:

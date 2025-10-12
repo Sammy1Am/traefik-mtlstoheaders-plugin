@@ -1,3 +1,3 @@
-module github.com/traefik/plugindemo
+module github.com/Sammy1Am/traefik-mtlstoheaders-plugin
 
 go 1.19
