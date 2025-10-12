@@ -12,13 +12,13 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
-	"github.com/traefik/traefik/v3/pkg/config/dynamic"
 	"github.com/traefik/traefik/v3/pkg/middlewares"
 )
 
 const typeName = "PassClientTLSCert"
 
 const (
+	xForwardedTLS     = "X-Forwarded-Tls-"
 	xForwardedTLSClientCert     = "X-Forwarded-Tls-Client-Cert"
 	xForwardedTLSClientCertInfo = "X-Forwarded-Tls-Client-Cert-Info"
 )
@@ -37,28 +37,28 @@ var attributeTypeNames = map[string]string{
 // for the distinguished name info of the issuer. This information is defined in
 // RFC3739, section 3.1.1.
 type IssuerDistinguishedNameOptions struct {
-	CommonName          bool
-	CountryName         bool
-	DomainComponent     bool
-	LocalityName        bool
-	OrganizationName    bool
-	SerialNumber        bool
-	StateOrProvinceName bool
+	CommonName          string
+	CountryName         string
+	DomainComponent     string
+	LocalityName        string
+	OrganizationName    string
+	SerialNumber        string
+	StateOrProvinceName string
 }
 
-func newIssuerDistinguishedNameOptions(info *dynamic.TLSClientCertificateIssuerDNInfo) *IssuerDistinguishedNameOptions {
+func newIssuerDistinguishedNameOptions(info *IssuerDistinguishedNameOptions) *IssuerDistinguishedNameOptions {
 	if info == nil {
 		return nil
 	}
 
 	return &IssuerDistinguishedNameOptions{
 		CommonName:          info.CommonName,
-		CountryName:         info.Country,
+		CountryName:         info.CountryName,
 		DomainComponent:     info.DomainComponent,
-		LocalityName:        info.Locality,
-		OrganizationName:    info.Organization,
+		LocalityName:        info.LocalityName,
+		OrganizationName:    info.OrganizationName,
 		SerialNumber:        info.SerialNumber,
-		StateOrProvinceName: info.Province,
+		StateOrProvinceName: info.StateOrProvinceName,
 	}
 }
 
@@ -66,55 +66,55 @@ func newIssuerDistinguishedNameOptions(info *dynamic.TLSClientCertificateIssuerD
 // for the distinguished name info of the subject. This information is defined
 // in RFC3739, section 3.1.2.
 type SubjectDistinguishedNameOptions struct {
-	CommonName             bool
-	CountryName            bool
-	DomainComponent        bool
-	LocalityName           bool
-	OrganizationName       bool
-	OrganizationalUnitName bool
-	SerialNumber           bool
-	StateOrProvinceName    bool
+	CommonName             string
+	CountryName            string
+	DomainComponent        string
+	LocalityName           string
+	OrganizationName       string
+	OrganizationalUnitName string
+	SerialNumber           string
+	StateOrProvinceName    string
 }
 
-func newSubjectDistinguishedNameOptions(info *dynamic.TLSClientCertificateSubjectDNInfo) *SubjectDistinguishedNameOptions {
+func newSubjectDistinguishedNameOptions(info *SubjectDistinguishedNameOptions) *SubjectDistinguishedNameOptions {
 	if info == nil {
 		return nil
 	}
 
 	return &SubjectDistinguishedNameOptions{
 		CommonName:             info.CommonName,
-		CountryName:            info.Country,
+		CountryName:            info.CountryName,
 		DomainComponent:        info.DomainComponent,
-		LocalityName:           info.Locality,
-		OrganizationName:       info.Organization,
-		OrganizationalUnitName: info.OrganizationalUnit,
+		LocalityName:           info.LocalityName,
+		OrganizationName:       info.OrganizationName,
+		OrganizationalUnitName: info.OrganizationalUnitName,
 		SerialNumber:           info.SerialNumber,
-		StateOrProvinceName:    info.Province,
+		StateOrProvinceName:    info.StateOrProvinceName,
 	}
 }
 
 // tlsClientCertificateInfo is a struct for specifying the configuration for the passTLSClientCert middleware.
 type tlsClientCertificateInfo struct {
-	notAfter     bool
-	notBefore    bool
-	sans         bool
+	notAfter     string
+	notBefore    string
+	sans         string
 	subject      *SubjectDistinguishedNameOptions
 	issuer       *IssuerDistinguishedNameOptions
-	serialNumber bool
+	serialNumber string
 }
 
-func newTLSClientCertificateInfo(info *dynamic.TLSClientCertificateInfo) *tlsClientCertificateInfo {
+func newTLSClientCertificateInfo(info *tlsClientCertificateInfo) *tlsClientCertificateInfo {
 	if info == nil {
 		return nil
 	}
 
 	return &tlsClientCertificateInfo{
-		issuer:       newIssuerDistinguishedNameOptions(info.Issuer),
-		notAfter:     info.NotAfter,
-		notBefore:    info.NotBefore,
-		subject:      newSubjectDistinguishedNameOptions(info.Subject),
-		serialNumber: info.SerialNumber,
-		sans:         info.Sans,
+		issuer:       newIssuerDistinguishedNameOptions(info.issuer),
+		notAfter:     info.notAfter,
+		notBefore:    info.notBefore,
+		subject:      newSubjectDistinguishedNameOptions(info.subject),
+		serialNumber: info.serialNumber,
+		sans:         info.sans,
 	}
 }
 
@@ -122,19 +122,19 @@ func newTLSClientCertificateInfo(info *dynamic.TLSClientCertificateInfo) *tlsCli
 type mtlsToHeaders struct {
 	next http.Handler
 	name string
-	pem  bool                      // pass the sanitized pem to the backend in a specific header
+	pem  string                    // pass the sanitized pem to the backend in a specific header
 	info *tlsClientCertificateInfo // pass selected information from the client certificate
 }
 
 // New constructs a new mTLSToHeaders instance from supplied frontend header struct.
-func New(ctx context.Context, next http.Handler, config dynamic.mtlsToHeaders, name string) (http.Handler, error) {
+func New(ctx context.Context, next http.Handler, config mtlsToHeaders, name string) (http.Handler, error) {
 	middlewares.GetLogger(ctx, name, typeName).Debug().Msg("Creating middleware")
 
 	return &mtlsToHeaders{
 		next: next,
 		name: name,
-		pem:  config.PEM,
-		info: newTLSClientCertificateInfo(config.Info),
+		pem:  config.pem,
+		info: newTLSClientCertificateInfo(config.info),
 	}, nil
 }
 
@@ -146,9 +146,9 @@ func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	logger := middlewares.GetLogger(req.Context(), p.name, typeName)
 	ctx := logger.WithContext(req.Context())
 
-	if p.pem {
+	if p.pem != "" {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
-			req.Header.Set(xForwardedTLSClientCert, getCertificates(ctx, req.TLS.PeerCertificates))
+			req.Header.Set(xForwardedTLS+p.pem, getCertificates(ctx, req.TLS.PeerCertificates))
 		} else {
 			logger.Debug().Msg("Tried to extract a certificate on a request without mutual TLS")
 		}
@@ -188,22 +188,22 @@ func (p *mtlsToHeaders) getCertInfo(ctx context.Context, certs []*x509.Certifica
 				values = append(values, fmt.Sprintf(`Issuer="%s"`, strings.TrimSuffix(issuer, subFieldSeparator)))
 			}
 
-			if p.info.serialNumber && peerCert.SerialNumber != nil {
+			if p.info.serialNumber != "" && peerCert.SerialNumber != nil {
 				sn := peerCert.SerialNumber.String()
 				if sn != "" {
 					values = append(values, fmt.Sprintf(`SerialNumber="%s"`, strings.TrimSuffix(sn, subFieldSeparator)))
 				}
 			}
 
-			if p.info.notBefore {
+			if p.info.notBefore != "" {
 				values = append(values, fmt.Sprintf(`NB="%d"`, uint64(peerCert.NotBefore.Unix())))
 			}
 
-			if p.info.notAfter {
+			if p.info.notAfter != "" {
 				values = append(values, fmt.Sprintf(`NA="%d"`, uint64(peerCert.NotAfter.Unix())))
 			}
 
-			if p.info.sans {
+			if p.info.sans != "" {
 				sans := getSANs(peerCert)
 				if len(sans) > 0 {
 					values = append(values, fmt.Sprintf(`SAN="%s"`, strings.Join(sans, subFieldSeparator)))
@@ -228,32 +228,32 @@ func getIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOption
 	// Manage non-standard attributes
 	for _, name := range cs.Names {
 		// Domain Component - RFC 2247
-		if options.DomainComponent && attributeTypeNames[name.Type.String()] == "DC" {
+		if options.DomainComponent != "" && attributeTypeNames[name.Type.String()] == "DC" {
 			_, _ = fmt.Fprintf(content, "DC=%s%s", name.Value, subFieldSeparator)
 		}
 	}
 
-	if options.CountryName {
+	if options.CountryName != "" {
 		writeParts(ctx, content, cs.Country, "C")
 	}
 
-	if options.StateOrProvinceName {
+	if options.StateOrProvinceName != "" {
 		writeParts(ctx, content, cs.Province, "ST")
 	}
 
-	if options.LocalityName {
+	if options.LocalityName != "" {
 		writeParts(ctx, content, cs.Locality, "L")
 	}
 
-	if options.OrganizationName {
+	if options.OrganizationName != "" {
 		writeParts(ctx, content, cs.Organization, "O")
 	}
 
-	if options.SerialNumber {
+	if options.SerialNumber != "" {
 		writePart(ctx, content, cs.SerialNumber, "SN")
 	}
 
-	if options.CommonName {
+	if options.CommonName != "" {
 		writePart(ctx, content, cs.CommonName, "CN")
 	}
 
@@ -270,36 +270,36 @@ func getSubjectDNInfo(ctx context.Context, options *SubjectDistinguishedNameOpti
 	// Manage non standard attributes
 	for _, name := range cs.Names {
 		// Domain Component - RFC 2247
-		if options.DomainComponent && attributeTypeNames[name.Type.String()] == "DC" {
+		if options.DomainComponent != "" && attributeTypeNames[name.Type.String()] == "DC" {
 			_, _ = fmt.Fprintf(content, "DC=%s%s", name.Value, subFieldSeparator)
 		}
 	}
 
-	if options.CountryName {
+	if options.CountryName != "" {
 		writeParts(ctx, content, cs.Country, "C")
 	}
 
-	if options.StateOrProvinceName {
+	if options.StateOrProvinceName != "" {
 		writeParts(ctx, content, cs.Province, "ST")
 	}
 
-	if options.LocalityName {
+	if options.LocalityName != "" {
 		writeParts(ctx, content, cs.Locality, "L")
 	}
 
-	if options.OrganizationName {
+	if options.OrganizationName != "" {
 		writeParts(ctx, content, cs.Organization, "O")
 	}
 
-	if options.OrganizationalUnitName {
+	if options.OrganizationalUnitName != "" {
 		writeParts(ctx, content, cs.OrganizationalUnit, "OU")
 	}
 
-	if options.SerialNumber {
+	if options.SerialNumber != "" {
 		writePart(ctx, content, cs.SerialNumber, "SN")
 	}
 
-	if options.CommonName {
+	if options.CommonName != "" {
 		writePart(ctx, content, cs.CommonName, "CN")
 	}
 
