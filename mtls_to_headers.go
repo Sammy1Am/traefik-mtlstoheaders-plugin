@@ -6,7 +6,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +17,7 @@ import (
 const typeName = "PassClientTLSCert"
 
 const (
-	xForwardedTLS     = "X-Forwarded-Tls-"
+	xForwardedTLS               = "X-Forwarded-Tls-"
 	xForwardedTLSClientCert     = "X-Forwarded-Tls-Client-Cert"
 	xForwardedTLSClientCertInfo = "X-Forwarded-Tls-Client-Cert-Info"
 )
@@ -97,10 +96,17 @@ func newSubjectDistinguishedNameOptions(info *SubjectDistinguishedNameOptions) *
 type tlsClientCertificateInfo struct {
 	notAfter     string
 	notBefore    string
-	sans         string
+	sans         *tlsClientCertificateSans
 	subject      *SubjectDistinguishedNameOptions
 	issuer       *IssuerDistinguishedNameOptions
 	serialNumber string
+}
+
+type tlsClientCertificateSans struct {
+	dns   string
+	email string
+	ip    string
+	uri   string
 }
 
 func newTLSClientCertificateInfo(info *tlsClientCertificateInfo) *tlsClientCertificateInfo {
@@ -148,7 +154,7 @@ func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	if p.pem != "" {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
-			req.Header.Set(xForwardedTLS+p.pem, getCertificates(ctx, req.TLS.PeerCertificates))
+			req.Header.Set(xForwardedTLS+p.pem, strings.TrimSuffix(getCertificates(ctx, req.TLS.PeerCertificates), subFieldSeparator))
 		} else {
 			logger.Debug().Msg("Tried to extract a certificate on a request without mutual TLS")
 		}
@@ -156,8 +162,7 @@ func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	if p.info != nil {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
-			headerContent := p.getCertInfo(ctx, req.TLS.PeerCertificates)
-			req.Header.Set(xForwardedTLSClientCertInfo, url.QueryEscape(headerContent))
+			p.extractCertInfo(ctx, req.TLS.PeerCertificates, req)
 		} else {
 			logger.Debug().Msg("Tried to extract a certificate on a request without mutual TLS")
 		}
@@ -166,61 +171,40 @@ func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	p.next.ServeHTTP(rw, req)
 }
 
-// getCertInfo Build a string with the wanted client certificates information
-// - the `,` is used to separate certificates
-// - the `;` is used to separate root fields
-// - the value of root fields is always wrapped by double quote
+// extractCertInfo Writes cert info to headers
+// - the `,` is used to separate values in a single field
 // - if a field is empty, the field is ignored.
-func (p *mtlsToHeaders) getCertInfo(ctx context.Context, certs []*x509.Certificate) string {
-	var headerValues []string
+func (p *mtlsToHeaders) extractCertInfo(ctx context.Context, certs []*x509.Certificate, req *http.Request) {
 
 	for _, peerCert := range certs {
-		var values []string
 
 		if p.info != nil {
-			subject := getSubjectDNInfo(ctx, p.info.subject, &peerCert.Subject)
-			if subject != "" {
-				values = append(values, fmt.Sprintf(`Subject="%s"`, strings.TrimSuffix(subject, subFieldSeparator)))
-			}
-
-			issuer := getIssuerDNInfo(ctx, p.info.issuer, &peerCert.Issuer)
-			if issuer != "" {
-				values = append(values, fmt.Sprintf(`Issuer="%s"`, strings.TrimSuffix(issuer, subFieldSeparator)))
-			}
+			extractSubjectDNInfo(ctx, p.info.subject, &peerCert.Subject, req)
+			extractIssuerDNInfo(ctx, p.info.issuer, &peerCert.Subject, req)
 
 			if p.info.serialNumber != "" && peerCert.SerialNumber != nil {
 				sn := peerCert.SerialNumber.String()
 				if sn != "" {
-					values = append(values, fmt.Sprintf(`SerialNumber="%s"`, strings.TrimSuffix(sn, subFieldSeparator)))
+					writeHeaderValue(req, p.info.serialNumber, sn)
 				}
 			}
 
 			if p.info.notBefore != "" {
-				values = append(values, fmt.Sprintf(`NB="%d"`, uint64(peerCert.NotBefore.Unix())))
+				writeHeaderValue(req, p.info.notBefore, fmt.Sprintf("%d", uint64(peerCert.NotBefore.Unix())))
 			}
 
 			if p.info.notAfter != "" {
-				values = append(values, fmt.Sprintf(`NA="%d"`, uint64(peerCert.NotAfter.Unix())))
+				writeHeaderValue(req, p.info.notAfter, fmt.Sprintf("%d", uint64(peerCert.NotAfter.Unix())))
 			}
 
-			if p.info.sans != "" {
-				sans := getSANs(peerCert)
-				if len(sans) > 0 {
-					values = append(values, fmt.Sprintf(`SAN="%s"`, strings.Join(sans, subFieldSeparator)))
-				}
-			}
+			extractSANs(p.info.sans, peerCert, req)
 		}
-
-		value := strings.Join(values, fieldSeparator)
-		headerValues = append(headerValues, value)
 	}
-
-	return strings.Join(headerValues, certSeparator)
 }
 
-func getIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOptions, cs *pkix.Name) string {
+func extractIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOptions, cs *pkix.Name, req *http.Request) {
 	if options == nil {
-		return ""
+		return
 	}
 
 	content := &strings.Builder{}
@@ -234,33 +218,31 @@ func getIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOption
 	}
 
 	if options.CountryName != "" {
-		writeParts(ctx, content, cs.Country, "C")
+		writeHeaderValues(req, options.CountryName, cs.Country)
 	}
 
 	if options.StateOrProvinceName != "" {
-		writeParts(ctx, content, cs.Province, "ST")
+		writeHeaderValues(req, options.StateOrProvinceName, cs.Province)
 	}
 
 	if options.LocalityName != "" {
-		writeParts(ctx, content, cs.Locality, "L")
+		writeHeaderValues(req, options.LocalityName, cs.Locality)
 	}
 
 	if options.OrganizationName != "" {
-		writeParts(ctx, content, cs.Organization, "O")
+		writeHeaderValues(req, options.OrganizationName, cs.Organization)
 	}
 
 	if options.SerialNumber != "" {
-		writePart(ctx, content, cs.SerialNumber, "SN")
+		writeHeaderValue(req, options.SerialNumber, cs.SerialNumber)
 	}
 
 	if options.CommonName != "" {
-		writePart(ctx, content, cs.CommonName, "CN")
+		writeHeaderValue(req, options.CommonName, cs.CommonName)
 	}
-
-	return content.String()
 }
 
-func getSubjectDNInfo(ctx context.Context, options *SubjectDistinguishedNameOptions, cs *pkix.Name) string {
+func extractSubjectDNInfo(ctx context.Context, options *SubjectDistinguishedNameOptions, cs *pkix.Name, req *http.Request) string {
 	if options == nil {
 		return ""
 	}
@@ -276,49 +258,42 @@ func getSubjectDNInfo(ctx context.Context, options *SubjectDistinguishedNameOpti
 	}
 
 	if options.CountryName != "" {
-		writeParts(ctx, content, cs.Country, "C")
+		writeHeaderValues(req, options.CountryName, cs.Country)
 	}
 
 	if options.StateOrProvinceName != "" {
-		writeParts(ctx, content, cs.Province, "ST")
+		writeHeaderValues(req, options.StateOrProvinceName, cs.Province)
 	}
 
 	if options.LocalityName != "" {
-		writeParts(ctx, content, cs.Locality, "L")
+		writeHeaderValues(req, options.LocalityName, cs.Locality)
 	}
 
 	if options.OrganizationName != "" {
-		writeParts(ctx, content, cs.Organization, "O")
+		writeHeaderValues(req, options.OrganizationName, cs.Organization)
 	}
 
 	if options.OrganizationalUnitName != "" {
-		writeParts(ctx, content, cs.OrganizationalUnit, "OU")
+		writeHeaderValues(req, options.OrganizationalUnitName, cs.OrganizationalUnit)
 	}
 
 	if options.SerialNumber != "" {
-		writePart(ctx, content, cs.SerialNumber, "SN")
+		writeHeaderValue(req, options.SerialNumber, cs.SerialNumber)
 	}
 
 	if options.CommonName != "" {
-		writePart(ctx, content, cs.CommonName, "CN")
+		writeHeaderValue(req, options.CommonName, cs.CommonName)
 	}
 
 	return content.String()
 }
 
-func writeParts(ctx context.Context, content io.StringWriter, entries []string, prefix string) {
-	for _, entry := range entries {
-		writePart(ctx, content, entry, prefix)
-	}
+func writeHeaderValue(req *http.Request, headerSuffix string, value string) {
+	req.Header.Set(xForwardedTLS+headerSuffix, url.QueryEscape(strings.TrimSuffix(value, subFieldSeparator)))
 }
 
-func writePart(ctx context.Context, content io.StringWriter, entry, prefix string) {
-	if len(entry) > 0 {
-		_, err := content.WriteString(fmt.Sprintf("%s=%s%s", prefix, entry, subFieldSeparator))
-		if err != nil {
-			log.Ctx(ctx).Error().Err(err).Send()
-		}
-	}
+func writeHeaderValues(req *http.Request, headerSuffix string, values []string) {
+	req.Header.Set(xForwardedTLS+headerSuffix, url.QueryEscape(strings.Join(values, subFieldSeparator)))
 }
 
 // sanitize As we pass the raw certificates, remove the useless data and make it http request compliant.
@@ -353,22 +328,40 @@ func extractCertificate(ctx context.Context, cert *x509.Certificate) string {
 }
 
 // getSANs get the Subject Alternate Name values.
-func getSANs(cert *x509.Certificate) []string {
+func extractSANs(options *tlsClientCertificateSans, cert *x509.Certificate, req *http.Request) {
 	if cert == nil {
-		return nil
+		return
 	}
 
-	var sans []string
-	sans = append(sans, cert.DNSNames...)
-	sans = append(sans, cert.EmailAddresses...)
-
-	for _, ip := range cert.IPAddresses {
-		sans = append(sans, ip.String())
+	if options.dns != "" {
+		writeHeaderValues(req, options.dns, cert.DNSNames)
 	}
 
-	for _, uri := range cert.URIs {
-		sans = append(sans, uri.String())
+	if options.email != "" {
+		writeHeaderValues(req, options.dns, cert.EmailAddresses)
 	}
 
-	return sans
+	if options.ip != "" {
+		writeHeaderValues(req, options.dns, cert.DNSNames)
+	}
+
+	if options.uri != "" {
+		writeHeaderValues(req, options.dns, cert.DNSNames)
+	}
+
+	if options.ip != "" {
+		var ips []string
+		for _, ip := range cert.IPAddresses {
+			ips = append(ips, ip.String())
+		}
+		writeHeaderValues(req, options.ip, ips)
+	}
+
+	if options.uri != "" {
+		var uris []string
+		for _, uri := range cert.URIs {
+			uris = append(uris, uri.String())
+		}
+		writeHeaderValues(req, options.uri, uris)
+	}
 }
