@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/traefik/traefik/v3/pkg/testhelpers"
 )
 
 const (
@@ -313,7 +313,11 @@ func TestPassTLSClientCert_PEM(t *testing.T) {
 			require.NoError(t, err)
 
 			res := httptest.NewRecorder()
-			req := testhelpers.MustNewRequest(http.MethodGet, "http://example.com/foo", nil)
+
+			req, err := http.NewRequest(http.MethodGet, "http://example.com/foo", nil)
+			if err != nil {
+				panic(fmt.Sprintf("failed to create HTTP %s Request for '%s': %s", http.MethodGet, "http://example.com/foo", err))
+			}
 
 			if len(test.certContents) > 0 {
 				req.TLS = buildTLSWith(test.certContents)

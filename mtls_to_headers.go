@@ -10,21 +10,18 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-	"github.com/traefik/traefik/v3/pkg/middlewares"
+	"log"
 )
 
 const typeName = "PassClientTLSCert"
 
 const (
-	xForwardedTLS               = "X-Forwarded-Tls-"
-	xForwardedTLSClientCert     = "X-Forwarded-Tls-Client-Cert"
-	xForwardedTLSClientCertInfo = "X-Forwarded-Tls-Client-Cert-Info"
+	xForwardedTLS           = "X-Forwarded-Tls-"
+	xForwardedTLSClientCert = "X-Forwarded-Tls-Client-Cert"
 )
 
 const (
 	certSeparator     = ","
-	fieldSeparator    = ";"
 	subFieldSeparator = ","
 )
 
@@ -134,7 +131,7 @@ type mtlsToHeaders struct {
 
 // New constructs a new mTLSToHeaders instance from supplied frontend header struct.
 func New(ctx context.Context, next http.Handler, config mtlsToHeaders, name string) (http.Handler, error) {
-	middlewares.GetLogger(ctx, name, typeName).Debug().Msg("Creating middleware")
+	log.Print("Creating Middleware")
 
 	return &mtlsToHeaders{
 		next: next,
@@ -149,22 +146,20 @@ func (p *mtlsToHeaders) GetTracingInformation() (string, string) {
 }
 
 func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	logger := middlewares.GetLogger(req.Context(), p.name, typeName)
-	ctx := logger.WithContext(req.Context())
 
 	if p.pem != "" {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
-			req.Header.Set(xForwardedTLS+p.pem, strings.TrimSuffix(getCertificates(ctx, req.TLS.PeerCertificates), subFieldSeparator))
+			req.Header.Set(xForwardedTLS+p.pem, strings.TrimSuffix(getCertificates(req.TLS.PeerCertificates), subFieldSeparator))
 		} else {
-			logger.Debug().Msg("Tried to extract a certificate on a request without mutual TLS")
+			log.Print("Tried to extract a certificate on a request without mutual TLS")
 		}
 	}
 
 	if p.info != nil {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
-			p.extractCertInfo(ctx, req.TLS.PeerCertificates, req)
+			p.extractCertInfo(req.TLS.PeerCertificates, req)
 		} else {
-			logger.Debug().Msg("Tried to extract a certificate on a request without mutual TLS")
+			log.Print("Tried to extract a certificate on a request without mutual TLS")
 		}
 	}
 
@@ -174,13 +169,13 @@ func (p *mtlsToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 // extractCertInfo Writes cert info to headers
 // - the `,` is used to separate values in a single field
 // - if a field is empty, the field is ignored.
-func (p *mtlsToHeaders) extractCertInfo(ctx context.Context, certs []*x509.Certificate, req *http.Request) {
+func (p *mtlsToHeaders) extractCertInfo(certs []*x509.Certificate, req *http.Request) {
 
 	for _, peerCert := range certs {
 
 		if p.info != nil {
-			extractSubjectDNInfo(ctx, p.info.subject, &peerCert.Subject, req)
-			extractIssuerDNInfo(ctx, p.info.issuer, &peerCert.Subject, req)
+			extractSubjectDNInfo(p.info.subject, &peerCert.Subject, req)
+			extractIssuerDNInfo(p.info.issuer, &peerCert.Subject, req)
 
 			if p.info.serialNumber != "" && peerCert.SerialNumber != nil {
 				sn := peerCert.SerialNumber.String()
@@ -202,7 +197,7 @@ func (p *mtlsToHeaders) extractCertInfo(ctx context.Context, certs []*x509.Certi
 	}
 }
 
-func extractIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOptions, cs *pkix.Name, req *http.Request) {
+func extractIssuerDNInfo(options *IssuerDistinguishedNameOptions, cs *pkix.Name, req *http.Request) {
 	if options == nil {
 		return
 	}
@@ -242,7 +237,7 @@ func extractIssuerDNInfo(ctx context.Context, options *IssuerDistinguishedNameOp
 	}
 }
 
-func extractSubjectDNInfo(ctx context.Context, options *SubjectDistinguishedNameOptions, cs *pkix.Name, req *http.Request) string {
+func extractSubjectDNInfo(options *SubjectDistinguishedNameOptions, cs *pkix.Name, req *http.Request) string {
 	if options == nil {
 		return ""
 	}
@@ -306,21 +301,21 @@ func sanitize(cert []byte) string {
 }
 
 // getCertificates Build a string with the client certificates.
-func getCertificates(ctx context.Context, certs []*x509.Certificate) string {
+func getCertificates(certs []*x509.Certificate) string {
 	var headerValues []string
 
 	for _, peerCert := range certs {
-		headerValues = append(headerValues, extractCertificate(ctx, peerCert))
+		headerValues = append(headerValues, extractCertificate(peerCert))
 	}
 
 	return strings.Join(headerValues, certSeparator)
 }
 
 // extractCertificate extract the certificate from the request.
-func extractCertificate(ctx context.Context, cert *x509.Certificate) string {
+func extractCertificate(cert *x509.Certificate) string {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 	if certPEM == nil {
-		log.Ctx(ctx).Error().Msg("Cannot extract the certificate content")
+		log.Print("Cannot extract the certificate content")
 		return ""
 	}
 
