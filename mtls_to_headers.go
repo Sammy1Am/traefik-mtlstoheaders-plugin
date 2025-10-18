@@ -6,7 +6,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -103,14 +102,14 @@ func (p *MTLSToHeaders) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
 			req.Header.Set(xForwardedTLS+p.pem, strings.TrimSuffix(getCertificates(req.TLS.PeerCertificates), subFieldSeparator))
 		} else {
-			log.Print("Tried to extract a certificate on a request without mutual TLS")
+			//log.Print("Tried to extract a certificate on a request without mutual TLS")
 		}
 	}
 	if p.info != nil {
 		if req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
 			p.extractCertInfo(req.TLS.PeerCertificates, req)
 		} else {
-			log.Print("Tried to extract a certificate on a request without mutual TLS")
+			//log.Print("Tried to extract a certificate on a request without mutual TLS")
 		}
 	}
 
@@ -124,9 +123,9 @@ func writeHeaderValue(req *http.Request, headerSuffix string, value string) {
 }
 
 func writeHeaderValues(req *http.Request, headerSuffix string, values []string) {
-	log.Printf("Invalues")
+	//log.Printf("Invalues")
 	req.Header.Set(xForwardedTLS+headerSuffix, url.QueryEscape(strings.Join(values, subFieldSeparator)))
-	log.Printf("Done values")
+	//log.Printf("Done values")
 }
 
 // getCertificates Build a string with the client certificates.
@@ -144,7 +143,7 @@ func getCertificates(certs []*x509.Certificate) string {
 func extractCertificate(cert *x509.Certificate) string {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 	if certPEM == nil {
-		log.Print("Cannot extract the certificate content")
+		//log.Print("Cannot extract the certificate content")
 		return ""
 	}
 
@@ -264,13 +263,11 @@ func extractSANs(options *tlsClientCertificateSans, cert *x509.Certificate, req 
 	if cert == nil {
 		return
 	}
-	log.Printf("InSANS")
 	if options.DNS != "" {
 		writeHeaderValues(req, options.DNS, cert.DNSNames)
 	}
 
 	if options.Email != "" {
-		log.Printf("InEmail")
 		writeHeaderValues(req, options.Email, cert.EmailAddresses)
 	}
 
